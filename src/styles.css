@@ -700,6 +700,69 @@ mark {
   font-weight: 600;
 }
 
+.column-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.column-toggle:hover {
+  color: var(--text-2);
+}
+
+.column-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.column-track {
+  position: relative;
+  width: 24px;
+  height: 14px;
+  border-radius: 999px;
+  background: #e3e6ec;
+  transition: background 0.15s ease;
+}
+
+.column-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+  transition: transform 0.15s ease;
+}
+
+.column-toggle input:checked + .column-track {
+  background: var(--accent);
+}
+
+.column-toggle input:checked + .column-track::after {
+  transform: translateX(10px);
+}
+
+.column-toggle input:focus-visible + .column-track {
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.16);
+}
+
+@media (max-width: 1100px) {
+  .column-toggle > span:last-child {
+    display: none;
+  }
+}
+
 /* Buttons */
 .btn {
   height: 32px;

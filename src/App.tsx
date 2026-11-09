@@ -94,6 +94,14 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [hideDimensionColumns, setHideDimensionColumns] = useState<boolean>(() => {
+    try {
+      const stored = window.localStorage.getItem("readtree.hideDimensionColumns");
+      return stored === null ? true : stored === "1";
+    } catch {
+      return true;
+    }
+  });
 
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -128,6 +136,10 @@ export default function App() {
   const node = built && root ? built.index.get(selectedId) ?? root : null;
   const rowIndices = node ? node.rowIndices : [];
   const isSearching = deferredQuery.length > 0;
+  const hiddenFields = useMemo(() => {
+    if (!hideDimensionColumns || !config) return new Set<string>();
+    return new Set(config.dimensions.map((dimension) => dimension.field));
+  }, [hideDimensionColumns, config]);
 
   const applyWorkbook = useCallback(
     (data: WorkbookData, preferred?: TreeConfig, mode: "new" | "refresh" = "new") => {
@@ -384,6 +396,17 @@ export default function App() {
   }, [notice]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "readtree.hideDimensionColumns",
+        hideDimensionColumns ? "1" : "0"
+      );
+    } catch {
+      // Local storage can be unavailable in restricted browser contexts.
+    }
+  }, [hideDimensionColumns]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const typing =
@@ -543,6 +566,15 @@ export default function App() {
                   <span className="record-count">
                     <strong>{formatNumber(rowIndices.length)}</strong> 条记录
                   </span>
+                  <label className="column-toggle" title="隐藏已用于树形分类的列（仅表格）">
+                    <input
+                      type="checkbox"
+                      checked={hideDimensionColumns}
+                      onChange={(event) => setHideDimensionColumns(event.target.checked)}
+                    />
+                    <span className="column-track" />
+                    <span>隐藏分类列</span>
+                  </label>
                   <button
                     type="button"
                     className="btn btn-outline"
@@ -561,6 +593,7 @@ export default function App() {
                 rowIndices={rowIndices}
                 query={deferredQuery}
                 selectedRow={selectedRow}
+                hiddenFields={hiddenFields}
                 onOpenRow={setSelectedRow}
               />
             </section>

@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.pnpm-store/
+.tmp/
+.edge-*/
+.edge-profile*/
+downloads/
+*.log
+ReadTreeData/
+.zipcheck/
+desktop/build/
+startup.log
+tools/mingit/
+tools/mingit.zip
+release/ReadTree-Windows/
+%SystemDrive%/
+.hosts.backup

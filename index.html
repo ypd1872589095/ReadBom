@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f7f9" />
+    <meta name="description" content="ReadTree - 把 Excel 表格变成可浏览的分类树，完全本地运行。" />
+    <title>ReadTree · Excel 树状浏览</title>
+    <style>
+      html, body { margin: 0; background: #f6f7f9; }
+      .boot {
+        height: 100vh; display: flex; align-items: center; justify-content: center;
+        gap: 10px; color: #8b93a1; font-size: 13px;
+        font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      .boot i {
+        width: 16px; height: 16px; border: 2px solid #e3e5fb; border-top-color: #4f46e5;
+        border-radius: 50%; animation: bootspin .7s linear infinite; display: block;
+      }
+      @keyframes bootspin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot"><i></i>正在载入 ReadTree…</div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

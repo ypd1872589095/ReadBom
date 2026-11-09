@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SheetData, TreeConfig } from "../types";
+import { MAX_DIMENSIONS } from "../constants";
 import { suggestDimensions } from "../lib/suggest";
 import {
   ArrowDownIcon,
@@ -50,7 +51,7 @@ export function FieldDialog({ sheet, initial, onApply, onClose }: FieldDialogPro
   );
 
   const addField = (field: string) => {
-    if (draft.dimensions.length >= 5) return;
+    if (draft.dimensions.length >= MAX_DIMENSIONS) return;
     if (draft.dimensions.some((dimension) => dimension.field === field)) return;
     setDraft((current) => ({
       ...current,
@@ -97,7 +98,7 @@ export function FieldDialog({ sheet, initial, onApply, onClose }: FieldDialogPro
 
   const apply = () => {
     onApply({
-      dimensions: draft.dimensions.slice(0, 5),
+      dimensions: draft.dimensions.slice(0, MAX_DIMENSIONS),
       emptyLabel: draft.emptyLabel.trim() || "(空)",
     });
   };
@@ -121,7 +122,7 @@ export function FieldDialog({ sheet, initial, onApply, onClose }: FieldDialogPro
           <div>
             <div className="dialog-title">分类字段</div>
             <div className="dialog-sub">
-              选择作为层级的列，顺序就是树的层级顺序，最多 5 层。
+              选择作为层级的列，顺序就是树的层级顺序，最多 {MAX_DIMENSIONS} 层。
             </div>
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭">
@@ -131,7 +132,7 @@ export function FieldDialog({ sheet, initial, onApply, onClose }: FieldDialogPro
 
         <div className="dialog-body">
           <div className="section-title">
-            <span>层级字段 {draft.dimensions.length} / 5</span>
+            <span>层级字段 {draft.dimensions.length} / {MAX_DIMENSIONS}</span>
             <button type="button" className="link-btn small" onClick={resetSuggested}>
               推荐字段
             </button>
@@ -212,7 +213,7 @@ export function FieldDialog({ sheet, initial, onApply, onClose }: FieldDialogPro
                   className="field-option"
                   key={field}
                   onClick={() => addField(field)}
-                  disabled={draft.dimensions.length >= 5}
+                  disabled={draft.dimensions.length >= MAX_DIMENSIONS}
                   title={sampleFor(field)}
                 >
                   <span className="plus">

@@ -1,4 +1,5 @@
 import type { SheetData, TreeConfig } from "../types";
+import { MAX_DIMENSIONS } from "../constants";
 
 const PREFIX = "readtree.config.v1.";
 
@@ -31,7 +32,7 @@ export function loadConfig(sheet: SheetData): TreeConfig | null {
           typeof dimension.field === "string" &&
           fields.has(dimension.field)
       )
-      .slice(0, 5)
+      .slice(0, MAX_DIMENSIONS)
       .map((dimension) => ({
         field: dimension.field,
         split: Boolean(dimension.split),
@@ -54,7 +55,7 @@ export function saveConfig(sheet: SheetData, config: TreeConfig): void {
     window.localStorage.setItem(
       keyFor(sheet),
       JSON.stringify({
-        dimensions: config.dimensions.slice(0, 5),
+        dimensions: config.dimensions.slice(0, MAX_DIMENSIONS),
         emptyLabel: config.emptyLabel || "(空)",
       })
     );

@@ -156,7 +156,7 @@ export function TreePanel({
                 }
                 style={{
                   top: (virtual.start + offset) * ROW_HEIGHT,
-                  paddingLeft: 8 + node.level * 16,
+                  paddingLeft: 8 + node.level * 12,
                 }}
                 onMouseDown={(event) => {
                   event.preventDefault();

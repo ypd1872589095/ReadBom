@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import type { SheetData, WorkbookData } from "../types";
+import type { SheetColumn, SheetData, WorkbookData } from "../types";
 
 const MAX_ROWS = 200000;
 
@@ -81,6 +81,21 @@ function detectHeaderRow(matrix: string[][]): number {
   return 0;
 }
 
+function headerUnit(header: string): string {
+  if (/万元|（万）|\(万\)/.test(header)) return "万元";
+  if (/%|％/.test(header)) return "%";
+  if (/元/.test(header)) return "元";
+  return "";
+}
+
+function formatUnit(format: string): string {
+  if (!format) return "";
+  if (format.includes("%")) return "%";
+  if (/万/.test(format)) return "万元";
+  if (/元|¥|￥/.test(format)) return "元";
+  return "";
+}
+
 function extractSheet(ws: XLSX.WorkSheet, name: string): SheetData | null {
   const ref = ws["!ref"];
   if (!ref) return null;
@@ -92,14 +107,20 @@ function extractSheet(ws: XLSX.WorkSheet, name: string): SheetData | null {
 
   normalizeDateFormats(ws);
 
-  const rawMatrix = XLSX.utils.sheet_to_json(ws, {
+  const displayMatrix = XLSX.utils.sheet_to_json(ws, {
     header: 1,
     raw: false,
     defval: "",
     blankrows: true,
   }) as unknown[][];
+  const rawMatrix = XLSX.utils.sheet_to_json(ws, {
+    header: 1,
+    raw: true,
+    defval: null,
+    blankrows: true,
+  }) as unknown[][];
 
-  const matrix = rawMatrix.map((row) =>
+  const matrix = displayMatrix.map((row) =>
     Array.from(Array.isArray(row) ? row : [], (value) => toText(value))
   );
   fillMerges(ws, matrix, range.s.r, range.s.c);
@@ -107,10 +128,11 @@ function extractSheet(ws: XLSX.WorkSheet, name: string): SheetData | null {
 
   const headerIndex = detectHeaderRow(matrix);
   const header = matrix[headerIndex] || [];
-  const dataRows = matrix
-    .slice(headerIndex + 1)
-    .filter((row) => row.some((value) => value !== ""));
-  if (dataRows.length === 0) return null;
+  const dataRowIndices: number[] = [];
+  for (let r = headerIndex + 1; r < matrix.length; r++) {
+    if (matrix[r] && matrix[r].some((value) => value !== "")) dataRowIndices.push(r);
+  }
+  if (dataRowIndices.length === 0) return null;
 
   let width = 0;
   for (const row of matrix) {
@@ -122,14 +144,15 @@ function extractSheet(ws: XLSX.WorkSheet, name: string): SheetData | null {
   for (let c = 0; c < header.length; c++) {
     if (header[c]) used[c] = true;
   }
-  for (const row of dataRows) {
+  for (const r of dataRowIndices) {
+    const row = matrix[r];
     for (let c = 0; c < width; c++) {
       if (row[c]) used[c] = true;
     }
   }
 
   const headers: string[] = [];
-  const columns: number[] = [];
+  const sourceColumns: number[] = [];
   const seen = new Map<string, number>();
   for (let c = 0; c < width; c++) {
     if (!used[c]) continue;
@@ -137,21 +160,93 @@ function extractSheet(ws: XLSX.WorkSheet, name: string): SheetData | null {
     const count = (seen.get(base) || 0) + 1;
     seen.set(base, count);
     headers.push(count === 1 ? base : base + " (" + count + ")");
-    columns.push(c);
+    sourceColumns.push(c);
   }
   if (headers.length === 0) return null;
 
-  const rows: string[][] = [];
-  for (const row of dataRows) {
-    const record = columns.map((c) => row[c] || "");
-    if (record.some((value) => value !== "")) rows.push(record);
-  }
+  const rows: string[][] = dataRowIndices.map((r) =>
+    sourceColumns.map((c) => (matrix[r] && matrix[r][c]) || "")
+  );
   if (rows.length === 0) return null;
+
+  const columns: SheetColumn[] = [];
+  const columnValues: (number | null)[][] = [];
+
+  for (let index = 0; index < sourceColumns.length; index++) {
+    const sourceCol = sourceColumns[index];
+    const name = headers[index];
+    const values: (number | null)[] = [];
+    let numericCount = 0;
+    let textCount = 0;
+    let dateCount = 0;
+    let emptyCount = 0;
+
+    for (const r of dataRowIndices) {
+      const raw = rawMatrix[r] ? rawMatrix[r][sourceCol] : null;
+      const display = (matrix[r] && matrix[r][sourceCol]) || "";
+      if (typeof raw === "number" && Number.isFinite(raw)) {
+        values.push(raw);
+        numericCount++;
+      } else if (raw instanceof Date) {
+        values.push(null);
+        dateCount++;
+      } else if (!display && (raw === null || raw === undefined || raw === "")) {
+        values.push(null);
+        emptyCount++;
+      } else {
+        values.push(null);
+        textCount++;
+      }
+    }
+
+    let detectedUnit = "";
+    let percentHits = 0;
+    let sampled = 0;
+    for (const r of dataRowIndices) {
+      if (sampled >= 80) break;
+      const cell = ws[
+        XLSX.utils.encode_cell({
+          r: range.s.r + r,
+          c: range.s.c + sourceCol,
+        })
+      ] as XLSX.CellObject | undefined;
+      if (!cell) continue;
+      sampled++;
+      const format = typeof cell.z === "string" ? cell.z : "";
+      if (format.includes("%")) percentHits++;
+      if (!detectedUnit) detectedUnit = formatUnit(format);
+    }
+
+    const fromHeader = headerUnit(name);
+    const percent =
+      fromHeader === "%" || percentHits > 0 || (sampled > 0 && detectedUnit === "%");
+    const unitLabel = percent ? "%" : fromHeader || detectedUnit;
+    const numeric = numericCount > 0 && textCount === 0 && dateCount === 0;
+
+    columns.push({
+      name,
+      index,
+      numeric,
+      percent,
+      unitLabel,
+      numericCount,
+      textCount,
+      dateCount,
+      emptyCount,
+    });
+    columnValues.push(values);
+  }
+
+  const numbers: (number | null)[][] = dataRowIndices.map((_, rowPosition) =>
+    columnValues.map((values) => values[rowPosition] ?? null)
+  );
 
   return {
     name,
     headers,
     rows,
+    numbers,
+    columns,
     headerRow: headerIndex + 1,
     totalRows: rows.length,
   };

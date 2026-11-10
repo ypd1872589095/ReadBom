@@ -8,13 +8,27 @@ import {
   type ChangeEvent,
   type DragEvent,
 } from "react";
-import type { SheetData, TreeConfig, WorkbookData } from "./types";
+import type {
+  ComputedDefinition,
+  ComputedResult,
+  SheetData,
+  SummaryItem,
+  TreeConfig,
+  WorkbookData,
+} from "./types";
 import { buildTree } from "./lib/tree";
 import { parseWorkbook } from "./lib/parse";
 import ParseWorker from "./workers/parse.worker?worker&inline";
 import { createDemoWorkbook, demoConfig } from "./lib/demo";
 import { suggestDimensions } from "./lib/suggest";
-import { loadConfig, saveConfig } from "./lib/storage";
+import {
+  loadComputedDefs,
+  loadConfig,
+  loadSummaryColumns,
+  saveComputedDefs,
+  saveConfig,
+  saveSummaryColumns,
+} from "./lib/storage";
 import { exportSheetAsCsv } from "./lib/csv";
 import { desktop, type DesktopFileMessage } from "./lib/desktop";
 import { formatNumber } from "./lib/format";
@@ -23,10 +37,19 @@ import { TreePanel } from "./components/TreePanel";
 import { RecordTable } from "./components/RecordTable";
 import { DetailDrawer } from "./components/DetailDrawer";
 import { FieldDialog } from "./components/FieldDialog";
+import { ComputedDialog } from "./components/ComputedDialog";
+import { computeComputedColumns } from "./lib/formula";
 import { EmptyState } from "./components/EmptyState";
 import { Toast } from "./components/Toast";
 import { LoadingVeil } from "./components/LoadingVeil";
 import { ChevronRightIcon, DownloadIcon, UploadIcon } from "./components/Icons";
+
+type SummaryOption = {
+  name: string;
+  kind: "base" | "computed";
+  unitLabel: string;
+  percent: boolean;
+};
 
 class WorkerUnavailableError extends Error {
   constructor() {
@@ -90,6 +113,10 @@ export default function App() {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
+  const [computedOpen, setComputedOpen] = useState(false);
+  const [computedDefs, setComputedDefs] = useState<ComputedDefinition[]>([]);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [summaryColumns, setSummaryColumns] = useState<string[]>([]);
   const [loadingName, setLoadingName] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -106,6 +133,7 @@ export default function App() {
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const summaryRef = useRef<HTMLDivElement | null>(null);
   const demoLoaded = useRef(false);
   const expandedFor = useRef("");
 
@@ -141,6 +169,75 @@ export default function App() {
     return new Set(config.dimensions.map((dimension) => dimension.field));
   }, [hideDimensionColumns, config]);
 
+  const computedResults = useMemo<ComputedResult[]>(() => {
+    if (!sheet) return [];
+    return computeComputedColumns(sheet, computedDefs);
+  }, [sheet, computedDefs]);
+
+  const validComputed = useMemo(
+    () => computedResults.filter((column) => !column.error),
+    [computedResults]
+  );
+
+  const summaryOptions = useMemo<SummaryOption[]>(() => {
+    if (!sheet) return [];
+    const base: SummaryOption[] = sheet.columns
+      .filter((column) => column.numeric)
+      .map((column) => ({
+        name: column.name,
+        kind: "base",
+        unitLabel: column.unitLabel,
+        percent: column.percent,
+      }));
+    const calculated: SummaryOption[] = validComputed.map((column) => ({
+      name: column.name,
+      kind: "computed",
+      unitLabel: "",
+      percent: false,
+    }));
+    return base.concat(calculated);
+  }, [sheet, validComputed]);
+
+  const summaryItems = useMemo<SummaryItem[]>(() => {
+    if (!sheet) return [];
+    const baseByName = new Map(sheet.columns.map((column) => [column.name, column]));
+    const calculatedByName = new Map(
+      validComputed.map((column) => [column.name, column])
+    );
+    const items: SummaryItem[] = [];
+    for (const name of summaryColumns) {
+      let values: (number | null)[] | null = null;
+      const base = baseByName.get(name);
+      if (base && base.numeric) {
+        values = rowIndices.map(
+          (rowIndex) => sheet.numbers[rowIndex]?.[base.index] ?? null
+        );
+      } else {
+        const calculated = calculatedByName.get(name);
+        if (calculated) {
+          values = rowIndices.map((rowIndex) => calculated.values[rowIndex] ?? null);
+        }
+      }
+      if (!values) continue;
+      let sum = 0;
+      let valid = 0;
+      for (const value of values) {
+        if (value !== null && Number.isFinite(value)) {
+          sum += value;
+          valid++;
+        }
+      }
+      items.push({
+        key: name,
+        label: name,
+        value: sum,
+        valid,
+        total: rowIndices.length,
+      });
+    }
+    return items;
+  }, [sheet, rowIndices, validComputed, summaryColumns]);
+
   const applyWorkbook = useCallback(
     (data: WorkbookData, preferred?: TreeConfig, mode: "new" | "refresh" = "new") => {
       if (data.sheets.length === 0) return;
@@ -161,6 +258,7 @@ export default function App() {
         setSheetIndex(nextIndex);
         setConfig(nextConfig);
         setSelectedRow(null);
+        setSummaryOpen(false);
         setNotice("文件已更新");
         return;
       }
@@ -171,12 +269,16 @@ export default function App() {
       setWorkbook(data);
       setSheetIndex(0);
       setConfig(nextConfig);
+      setComputedDefs(loadComputedDefs(target));
+      setSummaryColumns(loadSummaryColumns(target));
       setQuery("");
       setSelectedId("root");
       setExpanded(new Set());
       expandedFor.current = "";
       setSelectedRow(null);
       setConfigOpen(false);
+      setComputedOpen(false);
+      setSummaryOpen(false);
       setNotice(null);
     },
     [sheetIndex, config]
@@ -235,11 +337,15 @@ export default function App() {
     if (!target) return;
     setSheetIndex(index);
     setConfig(loadConfig(target) ?? defaultConfig(target));
+    setComputedDefs(loadComputedDefs(target));
+    setSummaryColumns(loadSummaryColumns(target));
     setQuery("");
     setSelectedId("root");
     setExpanded(new Set());
     expandedFor.current = "";
     setSelectedRow(null);
+    setComputedOpen(false);
+    setSummaryOpen(false);
   };
 
   const loadFile = useCallback(
@@ -316,6 +422,25 @@ export default function App() {
     setConfigOpen(false);
   };
 
+  const applyComputed = (next: ComputedDefinition[]) => {
+    if (!sheet) return;
+    setComputedDefs(next);
+    saveComputedDefs(sheet, next);
+    setComputedOpen(false);
+    const allowed = new Set<string>(sheet.headers);
+    for (const definition of next) allowed.add(definition.name);
+    setSummaryColumns((current) => current.filter((name) => allowed.has(name)));
+    setNotice(next.length > 0 ? "计算列已更新" : "已清除计算列");
+  };
+
+  const toggleSummaryColumn = (name: string) => {
+    setSummaryColumns((current) => {
+      if (current.includes(name)) return current.filter((item) => item !== name);
+      if (current.length >= 12) return current;
+      return current.concat(name);
+    });
+  };
+
   const selectNode = (id: string) => {
     setSelectedId(id);
     setSelectedRow(null);
@@ -341,7 +466,7 @@ export default function App() {
   const exportCurrent = () => {
     if (!sheet || !node) return;
     const label = node.level === 0 ? "全部记录" : node.label;
-    exportSheetAsCsv(sheet, node.rowIndices, sheet.name + "-" + label);
+    exportSheetAsCsv(sheet, node.rowIndices, sheet.name + "-" + label, validComputed);
   };
 
   useEffect(() => {
@@ -407,6 +532,33 @@ export default function App() {
   }, [hideDimensionColumns]);
 
   useEffect(() => {
+    if (!sheet) return;
+    saveSummaryColumns(sheet, summaryColumns);
+  }, [sheet, summaryColumns]);
+
+  useEffect(() => {
+    const names = new Set(summaryOptions.map((option) => option.name));
+    setSummaryColumns((current) => {
+      const next = current.filter((name) => names.has(name));
+      return next.length === current.length ? current : next;
+    });
+  }, [summaryOptions]);
+
+  useEffect(() => {
+    if (!summaryOpen) return;
+    const handleMouseDown = (event: MouseEvent) => {
+      if (
+        summaryRef.current &&
+        !summaryRef.current.contains(event.target as Node)
+      ) {
+        setSummaryOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [summaryOpen]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const typing =
@@ -430,8 +582,16 @@ export default function App() {
       }
 
       if (event.key === "Escape") {
+        if (computedOpen) {
+          setComputedOpen(false);
+          return;
+        }
         if (configOpen) {
           setConfigOpen(false);
+          return;
+        }
+        if (summaryOpen) {
+          setSummaryOpen(false);
           return;
         }
         if (selectedRow !== null) {
@@ -444,7 +604,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [configOpen, selectedRow, query]);
+  }, [computedOpen, configOpen, summaryOpen, selectedRow, query]);
 
   useEffect(() => {
     if (demoLoaded.current) return;
@@ -509,12 +669,14 @@ export default function App() {
             sheets={workbook.sheets}
             sheetIndex={sheetIndex}
             dimensionCount={config.dimensions.length}
+            computedCount={computedDefs.length}
             autoRefresh={autoRefresh}
             query={query}
             onQueryChange={setQuery}
             onSheetChange={changeSheet}
             onPickFile={openFilePicker}
             onOpenConfig={() => setConfigOpen(true)}
+            onOpenComputed={() => setComputedOpen(true)}
             searchRef={searchRef}
           />
 
@@ -575,6 +737,78 @@ export default function App() {
                     <span className="column-track" />
                     <span>隐藏分类列</span>
                   </label>
+                  <div className="summary-wrap" ref={summaryRef}>
+                    <button
+                      type="button"
+                      className={
+                        "btn btn-outline summary-button" +
+                        (summaryColumns.length > 0 ? " is-active" : "")
+                      }
+                      onClick={() => setSummaryOpen((current) => !current)}
+                      title="选择要合计的数值列"
+                    >
+                      <span className="sigma">Σ</span>
+                      合计
+                      {summaryItems.length > 0 ? (
+                        <span className="summary-count">{summaryItems.length}</span>
+                      ) : null}
+                    </button>
+                    {summaryOpen ? (
+                      <div className="summary-popover">
+                        <div className="summary-popover-head">
+                          <span>合计列</span>
+                          {summaryColumns.length > 0 ? (
+                            <button
+                              type="button"
+                              className="link-btn small"
+                              onClick={() => setSummaryColumns([])}
+                            >
+                              清除
+                            </button>
+                          ) : null}
+                        </div>
+                        {summaryOptions.length === 0 ? (
+                          <div className="summary-empty">
+                            没有可合计的纯数值列
+                          </div>
+                        ) : (
+                          <div className="summary-options">
+                            {summaryOptions.map((option) => (
+                              <label
+                                className="summary-option"
+                                key={option.kind + ":" + option.name}
+                                title={
+                                  option.unitLabel
+                                    ? option.name + "（" + option.unitLabel + "）"
+                                    : option.name
+                                }
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={summaryColumns.includes(option.name)}
+                                  onChange={() => toggleSummaryColumn(option.name)}
+                                />
+                                <span className="summary-option-name">
+                                  {option.name}
+                                </span>
+                                {option.unitLabel ? (
+                                  <span className="summary-unit">
+                                    {option.unitLabel}
+                                  </span>
+                                ) : null}
+                                {option.kind === "computed" ? (
+                                  <span className="summary-kind">ƒx</span>
+                                ) : null}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        <div className="summary-popover-foot">
+                          只合计当前筛选结果
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     className="btn btn-outline"
@@ -594,6 +828,8 @@ export default function App() {
                 query={deferredQuery}
                 selectedRow={selectedRow}
                 hiddenFields={hiddenFields}
+                computed={validComputed}
+                summary={summaryItems}
                 onOpenRow={setSelectedRow}
               />
             </section>
@@ -612,9 +848,19 @@ export default function App() {
         />
       ) : null}
 
+      {computedOpen && sheet ? (
+        <ComputedDialog
+          sheet={sheet}
+          initial={computedDefs}
+          onApply={applyComputed}
+          onClose={() => setComputedOpen(false)}
+        />
+      ) : null}
+
       {selectedRow !== null && sheet ? (
         <DetailDrawer
           sheet={sheet}
+          computed={validComputed}
           rowIndex={selectedRow}
           position={selectedPosition + 1}
           total={rowIndices.length}

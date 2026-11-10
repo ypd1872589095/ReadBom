@@ -1,4 +1,5 @@
-import type { SheetData } from "../types";
+import type { ComputedResult, SheetData } from "../types";
+import { formatComputedCsv } from "./format";
 
 function escapeCell(value: string): string {
   if (/[",\r\n]/.test(value)) {
@@ -14,11 +15,18 @@ function safeName(value: string): string {
 export function exportSheetAsCsv(
   sheet: SheetData,
   rowIndices: number[],
-  name: string
+  name: string,
+  computed: ComputedResult[] = []
 ): void {
-  const lines = [sheet.headers.map(escapeCell).join(",")];
+  const validComputed = computed.filter((column) => !column.error);
+  const headers = sheet.headers.concat(validComputed.map((column) => column.name));
+  const lines = [headers.map(escapeCell).join(",")];
   for (const rowIndex of rowIndices) {
-    lines.push((sheet.rows[rowIndex] || []).map(escapeCell).join(","));
+    const base = sheet.rows[rowIndex] || [];
+    const calculated = validComputed.map((column) =>
+      formatComputedCsv(column.values[rowIndex])
+    );
+    lines.push(base.concat(calculated).map(escapeCell).join(","));
   }
 
   const blob = new Blob(["\ufeff" + lines.join("\r\n")], {

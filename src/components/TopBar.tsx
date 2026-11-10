@@ -16,12 +16,14 @@ interface TopBarProps {
   sheets: SheetData[];
   sheetIndex: number;
   dimensionCount: number;
+  computedCount: number;
   autoRefresh: boolean;
   query: string;
   onQueryChange: (value: string) => void;
   onSheetChange: (index: number) => void;
   onPickFile: () => void;
   onOpenConfig: () => void;
+  onOpenComputed: () => void;
   searchRef: RefObject<HTMLInputElement | null>;
 }
 
@@ -30,12 +32,14 @@ export function TopBar({
   sheets,
   sheetIndex,
   dimensionCount,
+  computedCount,
   autoRefresh,
   query,
   onQueryChange,
   onSheetChange,
   onPickFile,
   onOpenConfig,
+  onOpenComputed,
   searchRef,
 }: TopBarProps) {
   const sheet = sheets[sheetIndex];
@@ -130,6 +134,12 @@ export function TopBar({
         <SlidersIcon size={14} />
         <span>分类字段</span>
         <span className="field-count">{dimensionCount}</span>
+      </button>
+
+      <button type="button" className="field-button" onClick={onOpenComputed} title="计算列">
+        <span className="fx-mark">ƒx</span>
+        <span>计算列</span>
+        {computedCount > 0 ? <span className="field-count">{computedCount}</span> : null}
       </button>
     </header>
   );

@@ -1,9 +1,11 @@
-import type { SheetData } from "../types";
+import type { ComputedResult, SheetData } from "../types";
+import { formatComputedValue } from "../lib/format";
 import { ChevronRightIcon, CloseIcon } from "./Icons";
 import { Highlight } from "./Highlight";
 
 interface DetailDrawerProps {
   sheet: SheetData;
+  computed: ComputedResult[];
   rowIndex: number;
   position: number;
   total: number;
@@ -17,6 +19,7 @@ interface DetailDrawerProps {
 
 export function DetailDrawer({
   sheet,
+  computed,
   rowIndex,
   position,
   total,
@@ -61,6 +64,28 @@ export function DetailDrawer({
               </div>
             );
           })}
+          {computed
+            .filter((column) => !column.error)
+            .map((column) => {
+              const value = formatComputedValue(column.values[rowIndex]);
+              return (
+                <div className="field" key={"computed-" + column.id}>
+                  <div
+                    className="field-label"
+                    title={column.warnings.length ? column.warnings.join("；") : undefined}
+                  >
+                    <span className="fx-mark">ƒx</span>
+                    {column.name}
+                    {column.warnings.length ? (
+                      <span className="computed-warning-dot">!</span>
+                    ) : null}
+                  </div>
+                  <div className={"field-value" + (value === "—" ? " is-empty" : "")}>
+                    {value}
+                  </div>
+                </div>
+              );
+            })}
         </div>
 
         <footer className="drawer-foot">

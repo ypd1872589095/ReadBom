@@ -1,4 +1,4 @@
-import type { SheetData, TreeConfig, WorkbookData } from "../types";
+import type { SheetColumn, SheetData, TreeConfig, WorkbookData } from "../types";
 
 const REGIONS = [
   { name: "华东", cities: ["上海", "杭州", "南京", "苏州"] },
@@ -20,6 +20,55 @@ const AMOUNT_FORMAT = new Intl.NumberFormat("zh-CN", {
 
 function pad2(value: number): string {
   return value < 10 ? "0" + value : String(value);
+}
+
+
+function makeSheet(
+  name: string,
+  headers: string[],
+  rows: string[][],
+  numericFields: Record<string, { unitLabel?: string; percent?: boolean }>
+): SheetData {
+  const valuesByColumn = headers.map((header, index) => {
+    const config = numericFields[header];
+    if (!config) return rows.map(() => null);
+    return rows.map((row) => {
+      const text = (row[index] || "").replace(/,/g, "").trim();
+      if (!text) return null;
+      const value = Number(text);
+      return Number.isFinite(value) ? value : null;
+    });
+  });
+
+  const columns: SheetColumn[] = headers.map((header, index) => {
+    const config = numericFields[header];
+    const values = valuesByColumn[index];
+    return {
+      name: header,
+      index,
+      numeric: Boolean(config) && values.some((value) => value !== null),
+      percent: Boolean(config?.percent),
+      unitLabel: config?.percent ? "%" : config?.unitLabel || "",
+      numericCount: values.filter((value) => value !== null).length,
+      textCount: config ? 0 : rows.filter((row) => (row[index] || "") !== "").length,
+      dateCount: 0,
+      emptyCount: rows.filter((row) => !(row[index] || "")).length,
+    };
+  });
+
+  const numbers = rows.map((_, rowIndex) =>
+    headers.map((_, columnIndex) => valuesByColumn[columnIndex][rowIndex])
+  );
+
+  return {
+    name,
+    headers,
+    rows,
+    numbers,
+    columns,
+    headerRow: 1,
+    totalRows: rows.length,
+  };
 }
 
 function projectSheet(): SheetData {
@@ -57,13 +106,10 @@ function projectSheet(): SheetData {
     ]);
   }
 
-  return {
-    name: "项目清单",
-    headers,
-    rows,
-    headerRow: 1,
-    totalRows: rows.length,
-  };
+  return makeSheet("项目清单", headers, rows, {
+    "年份": { unitLabel: "" },
+    "合同金额（万元）": { unitLabel: "万元" },
+  });
 }
 
 function customerSheet(): SheetData {
@@ -96,13 +142,9 @@ function customerSheet(): SheetData {
     ];
   });
 
-  return {
-    name: "客户名单",
-    headers,
-    rows,
-    headerRow: 1,
-    totalRows: rows.length,
-  };
+  return makeSheet("客户名单", headers, rows, {
+    "合作年份": { unitLabel: "" },
+  });
 }
 
 export const demoConfig: TreeConfig = {
